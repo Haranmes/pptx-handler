@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import json
 import xlwings as xw
+from pptx.util import Pt
 
 class PowerpointHandler:
     """
@@ -22,20 +23,21 @@ class PowerpointHandler:
         chart_path_with_names (list): A list of paths to the exported charts.
     """
 
-    def __init__(self, powerpoint_dir: Path, powerpoint_images_dir: Path, costumer_name: str, target_dir: Path):
+    def __init__(self, powerpoint_images_dir: list(), costumer_name: str, target_dir: Path):
         """
         Initializes the PowerpointHandler with the given directories and customer name.
-git
+
         Args:
-            powerpoint_dir (Path): The directory where the PowerPoint files are stored.
-            powerpoint_imges (Path): The directory where the PowerPoint images are stored.
+            powerpoint_images_dir (Path): The directory where the PowerPoint images are stored.
             costumer_name (str): The name of the customer.
+            target_dir (Path): The directory where the output PowerPoint files will be saved.
         """
         template_file_name = "202x-xx-xx_Datenanalyse_AKL_Kundenname.pptx"
-        self.powerpoint_dir = powerpoint_dir
+        self.powerpoint_dir = target_dir
         self.powerpoint_imges = powerpoint_images_dir
 
         # get working directory
+        # Get working directory
         self.template_dir = Path(__file__).resolve().parent / 'template' / template_file_name
         self.elements_file_path = self.powerpoint_dir / 'elements.json'
 
@@ -46,13 +48,13 @@ git
         self.target_dir = target_dir
         self.logo_path = None
 
+        # Find logo path in the images directory
         for image in self.powerpoint_imges:
             file_path = Path(image)
             if file_path.suffix == '.png':
                 file_name = file_path.stem
                 if self.like_operator('%ogo%', file_name):
                     self.logo_path = file_path
-
 
 
 
@@ -100,14 +102,6 @@ git
         if slide is None:
             raise ValueError("The slide number is not valid.")
 
-        # After
-
-        # for shape_idx, shape in enumerate(slide.shapes):
-        #     if self.elements[slide_number].get(shape.name, None) is None:
-        #         self.elements[slide_number][shape.name] = shape_idx
-        #     elif self.elements[slide_number].get(shape.name, None) != shape_idx:
-        #         self.elements[slide_number][shape.name] = shape_idx
-
         # Add new shapes to self.elements
         for shape_idx, shape in enumerate(slide.shapes):
             if shape.name not in self.elements[slide_number]:
@@ -119,9 +113,9 @@ git
             if shape_name not in existing_shape_names:
                 del self.elements[slide_number][shape_name]
 
-
         with open(self.elements_file_path, 'w') as json_file:
             json.dump(self.elements, json_file, indent=4)
+
 
     def __get_shape_and_slide(self, slide_number: int, shape_name: str) -> tuple:
         """
@@ -143,7 +137,41 @@ git
         shape = slide.shapes[shape_id]
         return shape, slide
 
-    def add_logo(self, image_path: str, shape_name: str = "logo", slide_number: int = 0) -> None:
+    def __separate_row_column(self, cell_reference: str) -> tuple:
+        """
+        Separates the row and column from a cell reference.
+
+        Args:
+            cell_reference (str): The cell reference (e.g., 'C4').
+
+        Returns:
+            tuple: A tuple containing the column and row (e.g., ('C', 4)).
+        """
+        match = re.match(r"([A-Z]+)([0-9]+)", cell_reference, re.I)
+        if match:
+            column, row = match.groups()
+            return column, int(row)
+        else:
+            raise ValueError("Invalid cell reference")
+
+    def __bring_shape_to_foreground(self, slide_number: int, shape_name: str) -> None:
+        """
+        Brings the specified shape to the foreground on a slide.
+
+        Args:
+            slide_number (int): The slide number where the shape is located.
+            shape_name (str): The name of the shape to be brought to the foreground.
+        """
+        shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
+        if shape is None:
+            raise ValueError(f"Shape with name {shape_name} not found on slide {slide_number}")
+
+        shape.z_order = 0  # Bring the shape to the front
+
+        self.__update_elements_of_slide(slide_number)
+        self.save_presentation()
+
+    def add_logo(self, image_path: str, shape_name: str = "logo", slide_number: int = 0, set_to_foreground : bool = False) -> None:
         """
         Adds a logo image to the slide by replacing an existing shape.
 
@@ -160,7 +188,13 @@ git
         image_path_string = str(image_path)
         slide.shapes.add_picture(image_path_string, left, top, width, height)
 
-    def add_costumer_name(self, costumer_name: str, slide_number: int = 0, shape_name: str = "costumer") -> None:
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+
+        self.__update_elements_of_slide(slide_number)
+        self.save_presentation()
+
+    def add_costumer_name(self, costumer_name: str, slide_number: int = 0, shape_name: str = "costumer", set_to_foreground : bool = False) -> None:
         """
         Adds the customer name to the slide by replacing an existing shape.
 
@@ -173,6 +207,10 @@ git
         if shape.has_text_frame is not True:
             raise ValueError("The shape is not a text frame.")
         shape.text = costumer_name
+
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
@@ -185,7 +223,7 @@ git
         self.pp.save(self.target_dir / output_path)
         print(f"Presentation saved to {self.target_dir / output_path}")
 
-    def add_table(self, title: str, slide_number: int, table: pd.DataFrame, shape_name: str):
+    def add_table(self, title: str, slide_number: int, table: pd.DataFrame, shape_name: str, set_to_foreground : bool = False) -> None:
         """
         Adds a table to the slide.
 
@@ -215,6 +253,9 @@ git
                 cell = table_shape.cell(row_idx + 1, col_idx)
                 cell.text = str(value)
 
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
@@ -240,7 +281,7 @@ git
                 chart_paths.append(chart_path)
         return chart_paths
 
-    def add_chart_from_file(self, slide_number: int, shape_name: str, chart_path_with_name_and_type: str) -> None:
+    def add_chart_from_file(self, slide_number: int, shape_name: str, chart_path_with_name_and_type: str, set_to_foreground : bool = False) -> None:
         """
         Adds a chart image to the slide from a file.
 
@@ -259,12 +300,32 @@ git
         sp.getparent().remove(sp)
 
         chart_path = str(self.powerpoint_dir / f"{chart_path_with_name_and_type}")
-        slide.shapes.add_picture(chart_path, left, top, width, height)
+        image = slide.shapes.add_picture(chart_path, left, top, width, height)
+
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+        else:
+            slide.shapes._spTree.insert(2, image._element)
 
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
-    def add_table_from_excel(self, slide_number: int, shape_name: str, path_to_excel_file: str, sheet_number: int = 0) -> None:
+    def export_and_add_chart(self, path_to_excel_file: str, sheet_number: int, slide_number: int,
+                             shape_name: str, set_to_foreground : bool = False) -> None:
+        """
+        Exports a chart from an Excel file and adds it to a PowerPoint slide.
+
+        Args:
+            path_to_excel_file (str): The path to the Excel file.
+            sheet_number (int): The sheet number to export charts from.
+            slide_number (int): The slide number where the chart will be added.
+            shape_name (str): The name of the shape to be replaced.
+        """
+        chart_paths = self.export_plot_from_excel(path_to_excel_file, sheet_number)
+        if chart_paths:
+            self.add_chart_from_file(slide_number, shape_name, chart_paths[0], set_to_foreground)
+
+    def add_table_from_excel(self, slide_number: int, shape_name: str, path_to_excel_file: str, sheet_number: int = 0, set_to_foreground : bool = False) -> None:
         """
         Adds a table to the slide from an Excel file.
 
@@ -290,5 +351,150 @@ git
                     cell = table_shape.cell(row_idx, col_idx)
                     cell.text = str(value)
             book.close()
+
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+        else:
+            slide.shapes._spTree.insert(2, table_shape._element)
+
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
+
+    def add_textbox_from_excel_range(self, slide_number: int, shape_name: str, path_to_excel_file: str, sheet_number: int,
+                                   start_cell: str, end_cell: str, font_size : float = 9, set_to_foreground : bool = False) -> None:
+        """
+        Adds text to the slide from a specified range in an Excel file.
+
+        Args:
+            slide_number (int): The slide number where the text will be added.
+            shape_name (str): The name of the shape to be replaced.
+            path_to_excel_file (str): The path to the Excel file.
+            sheet_number (int): The sheet number to get the text from.
+            start_cell (str): The starting cell of the range.
+            end_cell (str): The ending cell of the range.
+        """
+        # Open the Excel file and get the specified range
+        shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
+
+        if shape is None:
+            raise ValueError(f"Shape with name {shape_name} not found on slide {slide_number}")
+
+        with (xw.App(visible=False) as app):
+            book = app.books.open(path_to_excel_file)
+            sheet = book.sheets[sheet_number]
+
+            # split column from row in the start and end cell
+            start_column, start_row = self.__separate_row_column(start_cell)
+            end_column, end_row = self.__separate_row_column(end_cell)
+            output_text = ""
+
+            for row in range(start_row, end_row + 1):
+                text = ""
+                for column in range(ord(start_column), ord(end_column) + 1):
+                    text += str(sheet[f"{chr(column)}{row}"].value) + "\t"
+                text = text[:-1]
+                output_text += text + "\n"
+
+
+            # Get the position and size of the existing shape
+            left = shape.left
+            top = shape.top
+            width = shape.width
+            height = shape.height
+
+            # Remove the existing shape
+            sp = shape._element
+            sp.getparent().remove(sp)
+
+
+            # Add a new text box with the data from the Excel range
+            text_box = slide.shapes.add_textbox(left, top, width, height)
+            text_frame = text_box.text_frame
+            text_frame.clear()
+
+            p = text_frame.add_paragraph()
+            p.text = output_text
+            p.font.size = Pt(font_size)
+
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+        else:
+            slide.shapes._spTree.insert(2, p._element)
+
+        self.__update_elements_of_slide(slide_number)
+        self.save_presentation()
+
+
+    def add_table_from_excel_range(self, slide_number: int, shape_name: str, path_to_excel_file: str,
+                                     sheet_number: int,
+                                     start_cell: str, end_cell: str, font_size: float = 9, set_to_foreground : bool = False,
+                                     skip_header_row : bool = False) -> None:
+        """
+        Adds table to the slide from a specified range in an Excel file.
+
+        Args:
+            slide_number (int): The slide number where the text will be added.
+            shape_name (str): The name of the shape to be replaced.
+            path_to_excel_file (str): The path to the Excel file.
+            sheet_number (int): The sheet number to get the text from.
+            start_cell (str): The starting cell of the range.
+            end_cell (str): The ending cell of the range.
+            font_size (float): The font size of the text.
+        """
+        # Open the Excel file and get the specified range
+        shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
+
+        if shape is None:
+            raise ValueError(f"Shape with name {shape_name} not found on slide {slide_number}")
+
+        with xw.App(visible=False) as app:
+            book = app.books.open(path_to_excel_file)
+            sheet = book.sheets[sheet_number]
+
+            # split column from row in the start and end cell
+            start_column, start_row = self.__separate_row_column(start_cell)
+            end_column, end_row = self.__separate_row_column(end_cell)
+            table_data = []
+
+            for row in range(start_row, end_row + 1):
+                row_data = []
+                for column in range(ord(start_column), ord(end_column) + 1):
+                    row_data.append(str(sheet[f"{chr(column)}{row}"].value))
+                table_data.append(row_data)
+
+            # Get the position and size of the existing shape
+            left = shape.left
+            top = shape.top
+            width = shape.width
+            height = shape.height
+
+            # Remove the existing shape
+            sp = shape._element
+            sp.getparent().remove(sp)
+
+            # Add a new table with the data from the Excel range
+            if skip_header_row:
+                skip = int(1)
+            else:
+                skip = int(0)
+
+            rows, cols = len(table_data) - skip, len(table_data[0])
+            table_shape = slide.shapes.add_table(rows, cols, left, top, width, height).table
+            for row_idx, row in enumerate(table_data[skip:], start=1):
+                for col_idx, value in enumerate(row):
+                    cell = table_shape.cell(row_idx - 1, col_idx)
+                    cell.text = value
+                    cell.text_frame.paragraphs[0].font.size = Pt(font_size)
+
+        if set_to_foreground:
+            self.__bring_shape_to_foreground(slide_number, shape_name)
+        else:
+            slide.shapes._spTree.insert(2, table_shape._element)
+
+
+
+        self.__update_elements_of_slide(slide_number)
+        self.save_presentation()
+
+
+

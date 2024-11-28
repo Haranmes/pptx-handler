@@ -15,8 +15,9 @@ Features
 --------
 
 * TODO
-    - Generate a package
-    - add logic
+    - Known Issue → Header row cant be skipped
+    - Install: pip install C:\Users\r.soliman\PycharmProjects\pptx_handler\dist\pptx_handler-0.1.0.tar.gz
+    - build: python -m build
 Credits
 -------
 
