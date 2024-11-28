@@ -22,19 +22,30 @@ class PowerpointHandler:
         chart_path_with_names (list): A list of paths to the exported charts.
     """
 
-    def __init__(self, powerpoint_dir: Path, powerpoint_images_dir: Path, costumer_name: str):
+    def __init__(self, powerpoint_dir: Path, powerpoint_images_dir: Path, costumer_name: str, target_dir: Path):
         """
         Initializes the PowerpointHandler with the given directories and customer name.
-
+git
         Args:
             powerpoint_dir (Path): The directory where the PowerPoint files are stored.
             powerpoint_imges (Path): The directory where the PowerPoint images are stored.
             costumer_name (str): The name of the customer.
         """
-        self.costumer_name = costumer_name
+        template_file_name = "202x-xx-xx_Datenanalyse_AKL_Kundenname.pptx"
         self.powerpoint_dir = powerpoint_dir
         self.powerpoint_imges = powerpoint_images_dir
+
+        # get working directory
+        self.template_dir = Path(__file__).resolve().parent / 'template' / template_file_name
+        self.elements_file_path = self.powerpoint_dir / 'elements.json'
+
+        self.pp = pp(self.template_dir)
+        self.elements = self.__get_elements_per_slide()
+
+        self.costumer_name = costumer_name
+        self.target_dir = target_dir
         self.logo_path = None
+
         for image in self.powerpoint_imges:
             file_path = Path(image)
             if file_path.suffix == '.png':
@@ -42,9 +53,8 @@ class PowerpointHandler:
                 if self.like_operator('%ogo%', file_name):
                     self.logo_path = file_path
 
-        template_file_name = "202x-xx-xx_Datenanalyse_AKL_Kundenname.pptx"
-        path_to_file = self.powerpoint_dir / template_file_name
-        self.pp = pp(path_to_file)
+
+
 
     def like_operator(self, pattern, string) -> bool:
         """
@@ -73,9 +83,10 @@ class PowerpointHandler:
             for shape_idx, shape in enumerate(slide.shapes):
                 slide_shapes_name[slide_idx][shape.name] = shape_idx
 
-        self.elements_file_path = self.powerpoint_dir / 'elements.json'
         with open(self.elements_file_path, 'w') as json_file:
             json.dump(slide_shapes_name, json_file, indent=4)
+
+        print(slide_shapes_name)
         return slide_shapes_name
 
     def __update_elements_of_slide(self, slide_number: int) -> None:
@@ -86,11 +97,28 @@ class PowerpointHandler:
             slide_number (int): The slide number to update.
         """
         slide = self.pp.slides[slide_number] if self.pp.slides[slide_number] is not None else None
+        if slide is None:
+            raise ValueError("The slide number is not valid.")
+
+        # After
+
+        # for shape_idx, shape in enumerate(slide.shapes):
+        #     if self.elements[slide_number].get(shape.name, None) is None:
+        #         self.elements[slide_number][shape.name] = shape_idx
+        #     elif self.elements[slide_number].get(shape.name, None) != shape_idx:
+        #         self.elements[slide_number][shape.name] = shape_idx
+
+        # Add new shapes to self.elements
         for shape_idx, shape in enumerate(slide.shapes):
             if shape.name not in self.elements[slide_number]:
-                del self.elements[slide_number][shape.name]
-                continue
-            self.elements[slide_number][shape.name] = shape_idx
+                self.elements[slide_number][shape.name] = shape_idx
+
+        # Remove shapes from self.elements that no longer exist in slide.shapes
+        existing_shape_names = {shape.name for shape in slide.shapes}
+        for shape_name in list(self.elements[slide_number].keys()):
+            if shape_name not in existing_shape_names:
+                del self.elements[slide_number][shape_name]
+
 
         with open(self.elements_file_path, 'w') as json_file:
             json.dump(self.elements, json_file, indent=4)
@@ -154,7 +182,8 @@ class PowerpointHandler:
         """
         current_date = datetime.now().strftime('%Y-%m-%d')
         output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
-        self.pp.save(self.powerpoint_dir / output_path)
+        self.pp.save(self.target_dir / output_path)
+        print(f"Presentation saved to {self.target_dir / output_path}")
 
     def add_table(self, title: str, slide_number: int, table: pd.DataFrame, shape_name: str):
         """
@@ -167,11 +196,16 @@ class PowerpointHandler:
             shape_name (str): The name of the shape to be replaced.
         """
         shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
+
         left = shape.left
         top = shape.top
         width = shape.width
         height = shape.height
         rows, cols = table.shape
+
+        sp = shape._element
+        sp.getparent().remove(sp)
+
         table_shape = slide.shapes.add_table(rows + 1, cols, left, top, width, height).table
         for col_idx, col_name in enumerate(table.columns):
             cell = table_shape.cell(0, col_idx)
@@ -180,6 +214,7 @@ class PowerpointHandler:
             for col_idx, value in enumerate(row):
                 cell = table_shape.cell(row_idx + 1, col_idx)
                 cell.text = str(value)
+
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
@@ -219,8 +254,13 @@ class PowerpointHandler:
         top = shape.top
         width = shape.width
         height = shape.height
+
+        sp = shape._element
+        sp.getparent().remove(sp)
+
         chart_path = str(self.powerpoint_dir / f"{chart_path_with_name_and_type}")
         slide.shapes.add_picture(chart_path, left, top, width, height)
+
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
