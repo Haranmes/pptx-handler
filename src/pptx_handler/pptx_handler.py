@@ -10,6 +10,10 @@ from pptx.util import Pt
 import os
 import math
 from typing import List
+import win32com.client as win32
+
+
+
 class PowerpointHandler:
     """
     A class to handle PowerPoint presentations, including adding tables, charts, and images.
@@ -49,7 +53,7 @@ class PowerpointHandler:
         self.costumer_name = costumer_name
         self.target_dir = target_dir
         self.logo_path = None
-
+        self.pptx_worked_on = False
         # Find logo path in the images directory
         for image in self.powerpoint_imges:
             file_path = Path(image)
@@ -224,6 +228,7 @@ class PowerpointHandler:
         output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
         self.pp.save(self.target_dir / output_path)
         print(f"Presentation saved to {self.target_dir / output_path}")
+        self.pptx_worked_on = True
 
     def add_table(self, title: str, slide_number: int, table: pd.DataFrame, shape_name: str, set_to_foreground : bool = False) -> None:
         """
@@ -260,64 +265,7 @@ class PowerpointHandler:
         self.__update_elements_of_slide(slide_number)
         self.save_presentation()
 
-
-
-    def export_plot_from_excel(self, path_to_excel_file: str, excel_chart_name : str, sheet_number: int = 0) -> list:
-        """
-        Exports charts from an Excel file to PNG images.
-
-        Args:
-            path_to_excel_file (str): The path to the Excel file.
-            sheet_number (int): The sheet number to export charts from.
-
-        Returns:
-            list: A list of paths to the exported chart images.
-        """
-        chart_paths = []
-        with xw.App(visible=False) as app:
-            book = app.books.open(path_to_excel_file)
-            sheet = book.sheets[sheet_number]
-            for chart in sheet.charts:
-                if chart.name == excel_chart_name:
-                    chart_name = chart.name
-                    chart_path = str(self.powerpoint_dir / f"{chart_name}.png")
-                    chart.to_png(chart_path)
-                    chart_paths.append(chart_path)
-        return chart_paths
-
-    def add_chart_from_file(self, slide_number: int, shape_name: str, chart_path_with_name_and_type: str,
-                            set_to_foreground: bool = False) -> None:
-        """
-        Adds a chart image to the slide from a file.
-
-        Args:
-            slide_number (int): The slide number where the chart will be added.
-            shape_name (str): The name of the shape to be replaced.
-            chart_path_with_name_and_type (str): The path to the chart image file.
-        """
-        shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
-        left = shape.left
-        top = shape.top
-        width = shape.width
-        height = shape.height
-
-        sp = shape._element
-        sp.getparent().remove(sp)
-
-        chart_path = str(self.powerpoint_dir / f"{chart_path_with_name_and_type}")
-        image = slide.shapes.add_picture(chart_path, left, top, width, height)
-
-        os.remove(chart_path)
-
-        if set_to_foreground:
-            self.__bring_shape_to_foreground(slide_number, shape_name)
-        else:
-            slide.shapes._spTree.insert(2, image._element)
-
-        self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
-
-    def export_and_add_chart(self, path_to_excel_file: str, sheet_number: int, slide_number: int, chart_name: str,
+    def add_chart_from_excel(self, path_to_excel_file: str, sheet_name: str, slide_number: int, chart_name: str,
                              shape_name: str, set_to_foreground: bool = False) -> None:
         """
         Exports a chart from an Excel file and adds it to a PowerPoint slide.
@@ -328,14 +276,80 @@ class PowerpointHandler:
             slide_number (int): The slide number where the chart will be added.
             shape_name (str): The name of the shape to be replaced.
         """
-        chart_paths = self.export_plot_from_excel(path_to_excel_file=path_to_excel_file, sheet_number=sheet_number, excel_chart_name=chart_name)
-        if chart_paths:
-            for chart in chart_paths:
-                chart_name_in_path = str(chart).rsplit('\\', 1)[-1]
-                if chart_name_in_path == f"{chart_name}.png":
-                    print(f"Adding chart {chart_name} to slide {slide_number}")
-                    self.add_chart_from_file(slide_number=slide_number, shape_name=shape_name, chart_path_with_name_and_type=chart,
-                                             set_to_foreground=set_to_foreground)
+
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
+
+        xlApp = win32.Dispatch('Excel.Application')
+        wb = xlApp.Workbooks.Open(path_to_excel_file)
+
+        pptApp = win32.Dispatch('PowerPoint.Application')
+        pptApp.Visible = True
+
+        if self.pptx_worked_on:
+            ppt = pptApp.Presentations.Open(self.target_dir / output_path)
+        else:
+            ppt = pptApp.Presentations.Open(self.template_dir)
+
+        window = pptApp.ActiveWindow
+        slide = ppt.Slides.Item(slide_number)
+        window.View.GotoSlide(slide_number)
+
+        # Copy the chart from Excel
+        wb.Sheets(sheet_name).ChartObjects(chart_name).Copy()
+
+        # Find the shape to replace
+        shape_to_replace = None
+        for shape in slide.Shapes:
+            print(shape.name)
+            if shape.name == shape_name:
+                shape_to_replace = shape
+                print(f"Found shape {shape_name} on slide {slide_number}")
+                break
+
+        if shape_to_replace:
+            print(f"Replacing shape {shape_name} on slide {slide_number}")
+            # Get the position and size of the existing shape
+            left = shape_to_replace.Left
+            top = shape_to_replace.Top
+            width = shape_to_replace.Width
+            height = shape_to_replace.Height
+
+            # Delete the existing shape
+            shape_to_replace.Delete()
+
+            # Paste the copied chart
+            slide.Shapes.Paste()
+
+            # Get the newly pasted shape
+            new_shape = slide.Shapes(slide.Shapes.Count)
+            new_shape.Left = left
+            new_shape.Top = top
+            new_shape.Width = width
+            new_shape.Height = height
+
+            if set_to_foreground:
+                new_shape.ZOrder(1)
+
+        wb.Close(SaveChanges=False)
+        xlApp.Quit()
+
+        # Release COM objects
+        del wb
+        del xlApp
+
+        ppt.SaveAs(str(self.target_dir / output_path))
+
+        print(f"Presentation saved to {self.target_dir / output_path}")
+        pptApp.Quit()
+
+        # Release COM objects
+        del ppt
+        del window
+        del pptApp
+
+        self.pptx_worked_on = True
+        self.__update_elements_of_slide(slide_number)
 
     def add_table_from_excel(self, slide_number: int, shape_name: str, path_to_excel_file: str, sheet_number: int = 0, set_to_foreground : bool = False) -> None:
         """
