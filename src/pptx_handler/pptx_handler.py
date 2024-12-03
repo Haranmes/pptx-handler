@@ -42,19 +42,24 @@ class PowerpointHandler:
         self.powerpoint_dir = target_dir
         self.powerpoint_imges = powerpoint_images_dir
 
-        # get working directory
+
         # Get working directory
-        self.template_dir = Path(__file__).resolve().parent / 'template' / template_file_name
+        self.template_dir = str(Path(__file__).resolve().parent / 'template' / template_file_name)
         self.elements_file_path = self.powerpoint_dir / 'elements.json'
 
         self.pp = pp(self.template_dir)
         self.elements = self.__get_elements_per_slide()
 
         self.costumer_name = costumer_name
+
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        self.output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
         self.target_dir = target_dir
+        self.output_dir = str(self.target_dir / self.output_path)
+
         self.logo_path = None
         self.pptx_worked_on = False
-        # Find logo path in the images directory
+
         for image in self.powerpoint_imges:
             file_path = Path(image)
             if file_path.suffix == '.png':
@@ -175,8 +180,15 @@ class PowerpointHandler:
         shape.z_order = 0  # Bring the shape to the front
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
+        self.__save_presentation()
 
+    def __save_presentation(self):
+        """
+        Saves the PowerPoint presentation with the current date and customer name.
+        """
+        self.pp.save(self.output_dir)
+        print(f"Presentation saved to {self.target_dir / self.output_path}")
+        self.pptx_worked_on = True
     def add_logo(self, image_path: str, shape_name: str = "logo", slide_number: int = 0, set_to_foreground : bool = False) -> None:
         """
         Adds a logo image to the slide by replacing an existing shape.
@@ -198,7 +210,6 @@ class PowerpointHandler:
             self.__bring_shape_to_foreground(slide_number, shape_name)
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
 
     def add_costumer_name(self, costumer_name: str, slide_number: int = 0, shape_name: str = "costumer", set_to_foreground : bool = False) -> None:
         """
@@ -218,17 +229,8 @@ class PowerpointHandler:
             self.__bring_shape_to_foreground(slide_number, shape_name)
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
 
-    def save_presentation(self):
-        """
-        Saves the PowerPoint presentation with the current date and customer name.
-        """
-        current_date = datetime.now().strftime('%Y-%m-%d')
-        output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
-        self.pp.save(self.target_dir / output_path)
-        print(f"Presentation saved to {self.target_dir / output_path}")
-        self.pptx_worked_on = True
+
 
     def add_table(self, title: str, slide_number: int, table: pd.DataFrame, shape_name: str, set_to_foreground : bool = False) -> None:
         """
@@ -263,7 +265,6 @@ class PowerpointHandler:
             self.__bring_shape_to_foreground(slide_number, shape_name)
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
 
     def add_chart_from_excel(self, path_to_excel_file: str, sheet_name: str, slide_number: int, chart_name: str,
                              shape_name: str, set_to_foreground: bool = False) -> None:
@@ -276,6 +277,8 @@ class PowerpointHandler:
             slide_number (int): The slide number where the chart will be added.
             shape_name (str): The name of the shape to be replaced.
         """
+        # Powerpoint Application works via 1-based indexing instead of 0-based indexing
+        slide_number += 1
 
         current_date = datetime.now().strftime('%Y-%m-%d')
         output_path = f"{current_date}_Datenanalyse_AKL_{self.costumer_name}.pptx"
@@ -328,8 +331,7 @@ class PowerpointHandler:
             new_shape.Width = width
             new_shape.Height = height
 
-            if set_to_foreground:
-                new_shape.ZOrder(1)
+            new_shape.ZOrder(1) # msoSendToBack → https://learn.microsoft.com/en-us/office/vba/api/office.msozordercmd
 
         wb.Close(SaveChanges=False)
         xlApp.Quit()
@@ -384,7 +386,6 @@ class PowerpointHandler:
             slide.shapes._spTree.insert(2, table_shape._element)
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()
 
 
 
@@ -407,6 +408,9 @@ class PowerpointHandler:
             font_size (float): The font size of the text.
         """
         # Open the Excel file and get the specified range
+        if self.pptx_worked_on:
+            self.pp = pp(self.output_dir)
+
         shape, slide = self.__get_shape_and_slide(slide_number, shape_name)
 
         if shape is None:
@@ -438,53 +442,37 @@ class PowerpointHandler:
             sp.getparent().remove(sp)
 
             # Add a new table with the data from the Excel range
-            if skip_header:
-                rows, cols = len(table_data) + 1, len(table_data[0])
-                table_shape = slide.shapes.add_table(rows, cols, left, top, width, height).table
-                for row_idx, row in enumerate(table_data):
-                    for col_idx, value in enumerate(row):
-                        cell = table_shape.cell(row_idx + 1, col_idx)
-                        if value != "None":
-                            if is_round and round_columns is not None and col_idx in round_columns:
-                                # convert value to float
+
+
+            rows, cols =  (len(table_data) + 1 if skip_header else len(table_data)), len(table_data[0])
+            table_shape = slide.shapes.add_table(rows, cols, left, top, width, height).table
+            for row_idx, row in enumerate(table_data):
+                for col_idx, value in enumerate(row):
+                    cell = table_shape.cell((row_idx + 1 if skip_header else row_idx), col_idx)
+                    if value != "None":
+                        if is_round and round_columns is not None and col_idx in round_columns:
+                            # convert value to float
+                            try:
                                 value_float = float(value)
-                                if value_float < 1:
+
+                                # round to two decimal places if value is less than or equal to 1 => percent value
+                                if value_float <= 1:
                                     value_round = round(value_float, 2)
                                 else:
                                     value_round = round(value_float, 0)
                                     value_round = int(value_round)
                                 value = str(value_round)
-                            cell.text = value
-                            cell.text_frame.paragraphs[0].font.size = Pt(font_size)
-                        else:
-                            cell.text = ""
-                            cell.text_frame.paragraphs[0].font.size = Pt(font_size)
-            else:
-                rows, cols = len(table_data), len(table_data[0])
-                table_shape = slide.shapes.add_table(rows, cols, left, top, width, height).table
-                for row_idx, row in enumerate(table_data):
-                    for col_idx, value in enumerate(row):
-                        cell = table_shape.cell(row_idx, col_idx)
-                        if value != "None" and row_idx != 0:
-                            if is_round and round_columns is not None and col_idx in round_columns:
-                                # convert value to float
-                                value_float = float(value)
-                                if value_float < 1:
-                                    value_round = round(value_float, 2)
-                                else:
-                                    value_round = round(value_float, 0)
-                                    value_round = int(value_round)
-                                value = str(value_round)
-                            cell.text = value
-                            cell.text_frame.paragraphs[0].font.size = Pt(font_size)
-                        else:
-                            cell.text = ""
-                            cell.text_frame.paragraphs[0].font.size = Pt(font_size)
+                            except ValueError:
+                                value = str(value)
+                        cell.text = value
+                        cell.text_frame.paragraphs[0].font.size = Pt(font_size)
+                    else:
+                        cell.text = ""
+                        cell.text_frame.paragraphs[0].font.size = Pt(font_size)
 
         if set_to_foreground:
             self.__bring_shape_to_foreground(slide_number, shape_name)
         else:
-            slide.shapes._spTree.insert(2, table_shape._element)
+            slide.shapes._spTree.insert(2, shape._element)
 
         self.__update_elements_of_slide(slide_number)
-        self.save_presentation()

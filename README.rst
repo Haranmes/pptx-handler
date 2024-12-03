@@ -16,14 +16,12 @@ Features
 
 * TODO
     - Known Issues
-        → The first row is always the header
-        → Chart 2 of second sheet cant be loaded
+        → The first row is always the header -> fixed
+        → Chart 2 of second sheet cant be loaded -> fixed
+        → Table cant be accessed if chart was loaded first -> fixed
     - Install: pip install C:\Users\r.soliman\PycharmProjects\pptx_handler\dist\pptx_handler-0.1.0.tar.gz
     - build: python -m build
-    - dont forget to update the version in pyproject.toml
-    - dont forget to update the version in pptx_handler/__init__.py
-    - reformat number of decimal places in the excel sheet
-    - Übersicht -> linke spalte komplett aufrunden, rechte spalte zwei nachkommerstellen
+
 Credits
 -------
 
